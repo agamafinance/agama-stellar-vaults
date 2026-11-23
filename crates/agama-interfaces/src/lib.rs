@@ -89,3 +89,55 @@ pub trait VaultLiquidity {
 
 /// Basis points denominator.
 pub const BPS: i128 = 10_000;
+
+// ---------------------------------------------------------------- Stablebonds
+
+/// Subscription / redemption interface of an Etherfuse Stablebond pool, as
+/// consumed by the Etherfuse adapter. To be confirmed against the deployed
+/// Etherfuse contracts before mainnet; a mock implements it for tests.
+#[contractclient(name = "StablebondPoolClient")]
+pub trait StablebondPool {
+    /// Pulls `usdc_amount` from `from` and credits bond units to `from`.
+    /// Returns the units credited.
+    fn subscribe(e: Env, from: Address, usdc_amount: i128) -> i128;
+    /// Burns `units` of `from` and pays USDC to `from`. Returns the USDC paid.
+    fn redeem(e: Env, from: Address, units: i128) -> i128;
+    /// Bond units held by `holder`.
+    fn units(e: Env, holder: Address) -> i128;
+}
+
+// ---------------------------------------------------------------- valuation
+
+/// Value, in vault-asset units, of `units` priced at `price`.
+///
+/// `price` is the SEP-40 price of one whole unit (10^`unit_decimals`) in the
+/// base asset, scaled by 10^`price_decimals`; the result is scaled to
+/// 10^`asset_decimals`. Rounds down. Returns `None` on overflow.
+pub fn value_of(
+    units: i128,
+    price: i128,
+    unit_decimals: u32,
+    price_decimals: u32,
+    asset_decimals: u32,
+) -> Option<i128> {
+    let num = units
+        .checked_mul(price)?
+        .checked_mul(10i128.checked_pow(asset_decimals)?)?;
+    let den = 10i128
+        .checked_pow(unit_decimals)?
+        .checked_mul(10i128.checked_pow(price_decimals)?)?;
+    Some(num / den)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::value_of;
+
+    #[test]
+    fn value_of_scales_between_decimals() {
+        // 2.5 tkUSD (6 dp) at 1.04 (7 dp) = 2.6 USDC (7 dp)
+        assert_eq!(value_of(2_500_000, 10_400_000, 6, 7, 7), Some(26_000_000));
+        assert_eq!(value_of(0, 10_400_000, 6, 7, 7), Some(0));
+        assert_eq!(value_of(i128::MAX, 2, 0, 0, 0), None);
+    }
+}
