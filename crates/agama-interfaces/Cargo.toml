@@ -1,0 +1,10 @@
+[package]
+name = "agama-interfaces"
+description = "Shared interfaces: SEP-40 oracle types and the Agama adapter / engine / vault clients"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+soroban-sdk = { workspace = true }
