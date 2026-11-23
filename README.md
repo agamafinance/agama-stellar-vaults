@@ -41,7 +41,11 @@ stellar contract build      # all contracts -> target/wasm32v1-none/release/*.wa
 cargo test --workspace      # unit + integration tests
 ```
 
-Testnet deployment: [`scripts/deploy-testnet.sh`](scripts/deploy-testnet.sh).
+Testnet: [`scripts/deploy-testnet.sh`](scripts/deploy-testnet.sh) deploys and wires everything (addresses in
+[`deployments/testnet.json`](deployments/testnet.json)); [`scripts/testnet_battery.py`](scripts/testnet_battery.py)
+runs the end-to-end battery against it ([last run](deployments/testnet-battery.log)).
+
+- Tenka source review vs deployed contracts: [`docs/TENKA_VERIFICATION.md`](docs/TENKA_VERIFICATION.md)
 
 ## License
 
