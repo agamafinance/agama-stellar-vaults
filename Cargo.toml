@@ -6,6 +6,7 @@ members = [
   "contracts/oracle",
   "contracts/allocation-engine",
   "adapters/private-credit",
+  "adapters/etherfuse",
   "mocks/mock-stablebond",
 ]
 
