@@ -3,6 +3,17 @@
 version = 4
 
 [[package]]
+name = "agama-allocation-engine"
+version = "0.1.0"
+dependencies = [
+ "agama-interfaces",
+ "soroban-sdk",
+ "stellar-access",
+ "stellar-contract-utils",
+ "stellar-macros",
+]
+
+[[package]]
 name = "agama-interfaces"
 version = "0.1.0"
 dependencies = [
