@@ -4,6 +4,7 @@ members = [
   "crates/agama-interfaces",
   "contracts/vault",
   "contracts/oracle",
+  "contracts/allocation-engine",
 ]
 
 [workspace.package]
