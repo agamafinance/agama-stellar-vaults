@@ -10,6 +10,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "agama-oracle"
+version = "0.1.0"
+dependencies = [
+ "agama-interfaces",
+ "soroban-sdk",
+ "stellar-access",
+ "stellar-macros",
+]
+
+[[package]]
 name = "agama-vault"
 version = "0.1.0"
 dependencies = [
