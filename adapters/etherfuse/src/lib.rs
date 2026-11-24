@@ -1,30 +1,38 @@
 #![no_std]
 //! # Etherfuse Stablebond adapter
 //!
-//! Holds Stellar-native tokenized government bonds (Etherfuse Stablebonds):
-//! the low-risk, on-chain leg of the book. Unlike private credit, the
-//! position subscribes and redeems in the same transaction, so `deposit`
-//! invests immediately and `withdraw` redeems what it needs.
+//! Holds Etherfuse Stablebonds (CETES, USTRY, TESOURO): tokenized government
+//! bonds issued on Stellar as classic assets, each with its Stellar Asset
+//! Contract. They are bought and sold through Etherfuse's API (quote, then an
+//! order settled to a KYB'd wallet), not through an on-chain pool, so the
+//! adapter follows the same operator-settled model as the private credit
+//! adapter, with one difference: the bonds themselves sit on the adapter.
 //!
-//! Valuation: `idle USDC + units × price`, the price read from a SEP-40
-//! oracle (the Etherfuse feed) and refused when older than `max_age`. Every
-//! subscription and redemption is checked against that price within
-//! `max_slippage_bps`.
+//! ```text
+//!  idle USDC ──dispatch──▶ usdc_in_transit ──confirm_purchase(usdc, bonds)──▶ bonds on the adapter
+//!      ▲                        │                                                  │
+//!      └─────cancel_transit─────┘                               dispatch_bonds ────┘
+//!      └──────settle_sale(bonds, usdc)◀── bonds_in_transit ◀──────────────────────┘
+//!                                               └──cancel_sale──▶ back on the adapter
+//! ```
 //!
-//! The pool is reached through the `StablebondPool` interface in
-//! `agama-interfaces`; it must be confirmed against the deployed Etherfuse
-//! contracts before mainnet.
+//! Every step moves the tokens and the bookkeeping in the same call:
+//! `confirm_purchase` pulls the bonds from the operator, `settle_sale` pulls
+//! the USDC. Nothing the adapter values is self-reported except the two
+//! in-transit amounts, which only ever hold what the adapter itself sent.
+//!
+//! Valuation: `idle USDC + usdc_in_transit + (bond balance + bonds_in_transit)
+//! × price`, where the price is the bond's SEP-40 price (Etherfuse publishes
+//! one on-chain, base USD), refused when older than `max_age`. Fills are
+//! checked against that price within `max_slippage_bps`.
 
 #[cfg(test)]
 mod test;
 
-use agama_interfaces::{
-    value_of, Asset, Sep40OracleClient, StablebondPoolClient, StrategyAdapter, BPS,
-};
+use agama_interfaces::{value_of, Asset, Sep40OracleClient, StrategyAdapter, BPS};
 use soroban_sdk::{
-    auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
     contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error, token,
-    vec, Address, Env, IntoVal, Symbol,
+    Address, Env,
 };
 use stellar_access::ownable::{self, Ownable};
 use stellar_macros::only_owner;
@@ -44,18 +52,24 @@ pub enum AdapterError {
     SlippageTooHigh = 7004,
     Overflow = 7005,
     InvalidConfig = 7006,
+    ExceedsInTransit = 7007,
+    InsufficientBonds = 7008,
 }
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Config {
     pub engine: Address,
+    /// Vault asset (USDC).
     pub asset: Address,
-    pub pool: Address,
+    /// Stablebond token (its Stellar Asset Contract).
+    pub bond: Address,
+    /// Account KYB'd with Etherfuse that executes the API orders.
+    pub operator: Address,
+    /// SEP-40 oracle pricing `feed` (Etherfuse's aggregator or Agama's).
     pub oracle: Address,
-    /// SEP-40 feed of one bond unit's price.
     pub feed: Asset,
-    pub unit_decimals: u32,
+    /// Oldest acceptable price, in seconds.
     pub max_age: u64,
     pub max_slippage_bps: u32,
 }
@@ -64,72 +78,77 @@ pub struct Config {
 #[derive(Clone)]
 enum DataKey {
     Config,
+    UsdcInTransit,
+    BondsInTransit,
 }
 
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Subscribed {
+pub struct Dispatched {
     pub usdc: i128,
-    pub units: i128,
 }
 
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Redeemed {
-    pub units: i128,
+pub struct TransitCancelled {
+    pub usdc: i128,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Purchased {
+    pub usdc: i128,
+    pub bonds: i128,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BondsDispatched {
+    pub bonds: i128,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SaleCancelled {
+    pub bonds: i128,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Sold {
+    pub bonds: i128,
     pub usdc: i128,
 }
 
 #[contract]
 pub struct EtherfuseAdapter;
 
+fn bump(e: &Env) {
+    e.storage()
+        .instance()
+        .extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
+}
+
 fn config(e: &Env) -> Config {
     e.storage().instance().get(&DataKey::Config).unwrap()
 }
 
-fn idle(e: &Env, c: &Config) -> i128 {
-    token::Client::new(e, &c.asset).balance(&e.current_contract_address())
+fn get(e: &Env, k: &DataKey) -> i128 {
+    e.storage().instance().get(k).unwrap_or(0)
 }
 
-fn units(e: &Env, c: &Config) -> i128 {
-    StablebondPoolClient::new(e, &c.pool).units(&e.current_contract_address())
+fn put(e: &Env, k: &DataKey, v: i128) {
+    e.storage().instance().set(k, &v);
+    bump(e);
+}
+
+fn balance(e: &Env, token_id: &Address) -> i128 {
+    token::Client::new(e, token_id).balance(&e.current_contract_address())
 }
 
 fn validate(e: &Env, c: &Config) {
-    if c.max_age == 0 || c.max_slippage_bps as i128 > BPS {
+    if c.max_age == 0 || c.max_slippage_bps as i128 > BPS || c.bond == c.asset {
         panic_with_error!(e, AdapterError::InvalidConfig);
-    }
-}
-
-/// (price, price decimals, asset decimals), refusing a missing or stale price.
-fn price(e: &Env, c: &Config) -> (i128, u32, u32) {
-    let oracle = Sep40OracleClient::new(e, &c.oracle);
-    let p = oracle
-        .lastprice(&c.feed)
-        .unwrap_or_else(|| panic_with_error!(e, AdapterError::NoPrice));
-    if e.ledger().timestamp().saturating_sub(p.timestamp) > c.max_age {
-        panic_with_error!(e, AdapterError::StalePrice);
-    }
-    (
-        p.price,
-        oracle.decimals(),
-        token::Client::new(e, &c.asset).decimals(),
-    )
-}
-
-fn units_value(e: &Env, c: &Config, u: i128) -> i128 {
-    if u == 0 {
-        return 0;
-    }
-    let (p, pd, ad) = price(e, c);
-    value_of(u, p, c.unit_decimals, pd, ad)
-        .unwrap_or_else(|| panic_with_error!(e, AdapterError::Overflow))
-}
-
-fn check_fill(e: &Env, c: &Config, usdc: i128, u: i128) {
-    let fair = units_value(e, c, u);
-    if (usdc - fair).abs() * BPS > fair * c.max_slippage_bps as i128 {
-        panic_with_error!(e, AdapterError::SlippageTooHigh);
     }
 }
 
@@ -139,28 +158,35 @@ fn positive(e: &Env, amount: i128) {
     }
 }
 
-fn subscribe(e: &Env, c: &Config, amount: i128) {
-    let me = e.current_contract_address();
-    // The pool pulls the USDC from this contract: authorize exactly that
-    // transfer for this call.
-    e.authorize_as_current_contract(vec![
-        e,
-        InvokerContractAuthEntry::Contract(SubContractInvocation {
-            context: ContractContext {
-                contract: c.asset.clone(),
-                fn_name: Symbol::new(e, "transfer"),
-                args: (me.clone(), c.pool.clone(), amount).into_val(e),
-            },
-            sub_invocations: vec![e],
-        }),
-    ]);
-    let got = StablebondPoolClient::new(e, &c.pool).subscribe(&me, &amount);
-    check_fill(e, c, amount, got);
-    Subscribed {
-        usdc: amount,
-        units: got,
+/// Value of `bonds` in vault-asset units at the oracle price.
+fn bonds_value(e: &Env, c: &Config, bonds: i128) -> i128 {
+    if bonds == 0 {
+        return 0;
     }
-    .publish(e);
+    let oracle = Sep40OracleClient::new(e, &c.oracle);
+    let p = oracle
+        .lastprice(&c.feed)
+        .unwrap_or_else(|| panic_with_error!(e, AdapterError::NoPrice));
+    if e.ledger().timestamp().saturating_sub(p.timestamp) > c.max_age {
+        panic_with_error!(e, AdapterError::StalePrice);
+    }
+    let bond_decimals = token::Client::new(e, &c.bond).decimals();
+    let asset_decimals = token::Client::new(e, &c.asset).decimals();
+    value_of(
+        bonds,
+        p.price,
+        bond_decimals,
+        oracle.decimals(),
+        asset_decimals,
+    )
+    .unwrap_or_else(|| panic_with_error!(e, AdapterError::Overflow))
+}
+
+fn check_fill(e: &Env, c: &Config, usdc: i128, bonds: i128) {
+    let fair = bonds_value(e, c, bonds);
+    if (usdc - fair).abs() * BPS > fair * c.max_slippage_bps as i128 {
+        panic_with_error!(e, AdapterError::SlippageTooHigh);
+    }
 }
 
 #[contractimpl]
@@ -169,9 +195,16 @@ impl EtherfuseAdapter {
         validate(e, &config);
         ownable::set_owner(e, &owner);
         e.storage().instance().set(&DataKey::Config, &config);
-        e.storage()
-            .instance()
-            .extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
+        bump(e);
+    }
+
+    // ------------------------------------------------------------ owner
+
+    #[only_owner]
+    pub fn set_operator(e: &Env, operator: Address) {
+        let mut c = config(e);
+        c.operator = operator;
+        e.storage().instance().set(&DataKey::Config, &c);
     }
 
     #[only_owner]
@@ -183,12 +216,121 @@ impl EtherfuseAdapter {
         e.storage().instance().set(&DataKey::Config, &c);
     }
 
+    // ------------------------------------------------------------ buy
+
+    /// Sends idle USDC to the operator, who swaps it for bonds via Etherfuse.
+    pub fn dispatch(e: &Env, usdc: i128) {
+        let c = config(e);
+        c.operator.require_auth();
+        positive(e, usdc);
+        if usdc > balance(e, &c.asset) {
+            panic_with_error!(e, AdapterError::InsufficientIdle);
+        }
+        token::Client::new(e, &c.asset).transfer(&e.current_contract_address(), &c.operator, &usdc);
+        put(
+            e,
+            &DataKey::UsdcInTransit,
+            get(e, &DataKey::UsdcInTransit) + usdc,
+        );
+        Dispatched { usdc }.publish(e);
+    }
+
+    /// Returns USDC whose purchase did not happen.
+    pub fn cancel_transit(e: &Env, usdc: i128) {
+        let c = config(e);
+        c.operator.require_auth();
+        positive(e, usdc);
+        let t = get(e, &DataKey::UsdcInTransit);
+        if usdc > t {
+            panic_with_error!(e, AdapterError::ExceedsInTransit);
+        }
+        token::Client::new(e, &c.asset).transfer(&c.operator, e.current_contract_address(), &usdc);
+        put(e, &DataKey::UsdcInTransit, t - usdc);
+        TransitCancelled { usdc }.publish(e);
+    }
+
+    /// Delivers the `bonds` bought with `usdc` of the in-transit USDC.
+    pub fn confirm_purchase(e: &Env, usdc: i128, bonds: i128) {
+        let c = config(e);
+        c.operator.require_auth();
+        positive(e, usdc);
+        positive(e, bonds);
+        let t = get(e, &DataKey::UsdcInTransit);
+        if usdc > t {
+            panic_with_error!(e, AdapterError::ExceedsInTransit);
+        }
+        check_fill(e, &c, usdc, bonds);
+        token::Client::new(e, &c.bond).transfer(&c.operator, e.current_contract_address(), &bonds);
+        put(e, &DataKey::UsdcInTransit, t - usdc);
+        Purchased { usdc, bonds }.publish(e);
+    }
+
+    // ------------------------------------------------------------ sell
+
+    /// Sends bonds to the operator for sale via Etherfuse.
+    pub fn dispatch_bonds(e: &Env, bonds: i128) {
+        let c = config(e);
+        c.operator.require_auth();
+        positive(e, bonds);
+        if bonds > balance(e, &c.bond) {
+            panic_with_error!(e, AdapterError::InsufficientBonds);
+        }
+        token::Client::new(e, &c.bond).transfer(&e.current_contract_address(), &c.operator, &bonds);
+        put(
+            e,
+            &DataKey::BondsInTransit,
+            get(e, &DataKey::BondsInTransit) + bonds,
+        );
+        BondsDispatched { bonds }.publish(e);
+    }
+
+    /// Returns bonds whose sale did not happen.
+    pub fn cancel_sale(e: &Env, bonds: i128) {
+        let c = config(e);
+        c.operator.require_auth();
+        positive(e, bonds);
+        let t = get(e, &DataKey::BondsInTransit);
+        if bonds > t {
+            panic_with_error!(e, AdapterError::ExceedsInTransit);
+        }
+        token::Client::new(e, &c.bond).transfer(&c.operator, e.current_contract_address(), &bonds);
+        put(e, &DataKey::BondsInTransit, t - bonds);
+        SaleCancelled { bonds }.publish(e);
+    }
+
+    /// Delivers the `usdc` received for `bonds` of the in-transit bonds.
+    pub fn settle_sale(e: &Env, bonds: i128, usdc: i128) {
+        let c = config(e);
+        c.operator.require_auth();
+        positive(e, bonds);
+        positive(e, usdc);
+        let t = get(e, &DataKey::BondsInTransit);
+        if bonds > t {
+            panic_with_error!(e, AdapterError::ExceedsInTransit);
+        }
+        check_fill(e, &c, usdc, bonds);
+        token::Client::new(e, &c.asset).transfer(&c.operator, e.current_contract_address(), &usdc);
+        put(e, &DataKey::BondsInTransit, t - bonds);
+        Sold { bonds, usdc }.publish(e);
+    }
+
+    // ------------------------------------------------------------ views
+
     pub fn config(e: &Env) -> Config {
         config(e)
     }
 
-    pub fn units(e: &Env) -> i128 {
-        units(e, &config(e))
+    pub fn usdc_in_transit(e: &Env) -> i128 {
+        get(e, &DataKey::UsdcInTransit)
+    }
+
+    pub fn bonds_in_transit(e: &Env) -> i128 {
+        get(e, &DataKey::BondsInTransit)
+    }
+
+    /// Bonds held on the adapter.
+    pub fn bonds(e: &Env) -> i128 {
+        balance(e, &config(e).bond)
     }
 }
 
@@ -200,57 +342,29 @@ impl StrategyAdapter for EtherfuseAdapter {
 
     fn total_value(e: Env) -> i128 {
         let c = config(&e);
-        idle(&e, &c) + units_value(&e, &c, units(&e, &c))
+        let bonds = balance(&e, &c.bond) + get(&e, &DataKey::BondsInTransit);
+        balance(&e, &c.asset) + get(&e, &DataKey::UsdcInTransit) + bonds_value(&e, &c, bonds)
     }
 
-    /// Everything is redeemable on-chain right away.
     fn available(e: Env) -> i128 {
-        Self::total_value(e)
+        balance(&e, &config(&e).asset)
     }
 
-    /// Invests the USDC the vault just sent.
+    /// USDC is already on the adapter; it stays idle until dispatched.
     fn deposit(e: Env, amount: i128) {
-        let c = config(&e);
-        c.engine.require_auth();
+        config(&e).engine.require_auth();
         positive(&e, amount);
-        if amount > idle(&e, &c) {
-            panic_with_error!(&e, AdapterError::InsufficientIdle);
-        }
-        subscribe(&e, &c, amount);
-        e.storage()
-            .instance()
-            .extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
     }
 
-    /// Redeems what is missing, then sends up to `amount` to `to`.
     fn withdraw(e: Env, amount: i128, to: Address) -> i128 {
         let c = config(&e);
         c.engine.require_auth();
         positive(&e, amount);
-        let me = e.current_contract_address();
-        let have = idle(&e, &c);
-        if have < amount {
-            let held = units(&e, &c);
-            let (p, pd, ad) = price(&e, &c);
-            // units for the shortfall, rounded up, capped at what is held
-            let shortfall = amount - have;
-            let scale_num = 10i128.pow(c.unit_decimals) * 10i128.pow(pd);
-            let scale_den = p * 10i128.pow(ad);
-            let need = (shortfall * scale_num + scale_den - 1) / scale_den;
-            let to_redeem = need.min(held);
-            if to_redeem > 0 {
-                let got = StablebondPoolClient::new(&e, &c.pool).redeem(&me, &to_redeem);
-                check_fill(&e, &c, got, to_redeem);
-                Redeemed {
-                    units: to_redeem,
-                    usdc: got,
-                }
-                .publish(&e);
-            }
+        if amount > balance(&e, &c.asset) {
+            panic_with_error!(&e, AdapterError::InsufficientIdle);
         }
-        let sent = amount.min(idle(&e, &c));
-        token::Client::new(&e, &c.asset).transfer(&me, &to, &sent);
-        sent
+        token::Client::new(&e, &c.asset).transfer(&e.current_contract_address(), &to, &amount);
+        amount
     }
 }
 

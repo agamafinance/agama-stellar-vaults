@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deploys the Agama contracts to Stellar testnet and wires them together.
 #
-#   SOURCE=<stellar keys alias> USDC=<USDC SAC id> \
+#   SOURCE=<stellar keys alias> USDC=<USDC SAC id> BOND=<Stablebond SAC id> \
 #   [CURATOR=<G..>] [OPERATOR=<G..>] [REPORTER=<G..>] ./scripts/deploy-testnet.sh
 #
 # SOURCE is the owner. Roles default to the owner; on mainnet the owner is a
@@ -12,6 +12,7 @@ set -euo pipefail
 NET=testnet
 : "${SOURCE:?set SOURCE to a stellar keys alias}"
 : "${USDC:?set USDC to the testnet USDC contract id}"
+: "${BOND:?set BOND to the Stablebond (e.g. CETES) contract id}"
 ME=$(stellar keys address "$SOURCE")
 CURATOR=${CURATOR:-$ME}
 OPERATOR=${OPERATOR:-$ME}
@@ -35,18 +36,17 @@ invoke() { retry stellar contract invoke --quiet --network "$NET" --source "$SOU
 VAULT=$(deploy agama_vault --owner "$ME" --asset "$USDC" --name "Agama USD" --symbol agUSD)
 ENGINE=$(deploy agama_allocation_engine --owner "$ME" --curator "$CURATOR" --vault "$VAULT" --asset "$USDC")
 ORACLE=$(deploy agama_oracle --owner "$ME" --base "{\"Stellar\":\"$USDC\"}" --decimals 7 --resolution $DAY)
-BOND_POOL=$(deploy agama_mock_stablebond --admin "$ME" --usdc "$USDC" --price 10000000)
 
 invoke "$ORACLE" set_reporter --reporter "$REPORTER" --allowed true
 invoke "$ORACLE" add_feed --asset '{"Other":"TKUSD"}' --max_deviation_bps 500
-invoke "$ORACLE" add_feed --asset "{\"Stellar\":\"$BOND_POOL\"}" --max_deviation_bps 0
+invoke "$ORACLE" add_feed --asset "{\"Stellar\":\"$BOND\"}" --max_deviation_bps 200
 
 TENKA=$(deploy agama_private_credit_adapter --owner "$ME" --config "{
   \"engine\":\"$ENGINE\",\"asset\":\"$USDC\",\"operator\":\"$OPERATOR\",\"oracle\":\"$ORACLE\",
   \"feed\":{\"Other\":\"TKUSD\"},\"unit_decimals\":6,\"max_age\":$((14*DAY)),\"max_slippage_bps\":100}")
 BONDS=$(deploy agama_etherfuse_adapter --owner "$ME" --config "{
-  \"engine\":\"$ENGINE\",\"asset\":\"$USDC\",\"pool\":\"$BOND_POOL\",\"oracle\":\"$ORACLE\",
-  \"feed\":{\"Stellar\":\"$BOND_POOL\"},\"unit_decimals\":7,\"max_age\":$((14*DAY)),\"max_slippage_bps\":50}")
+  \"engine\":\"$ENGINE\",\"asset\":\"$USDC\",\"bond\":\"$BOND\",\"operator\":\"$OPERATOR\",
+  \"oracle\":\"$ORACLE\",\"feed\":{\"Stellar\":\"$BOND\"},\"max_age\":3600,\"max_slippage_bps\":100}")
 
 invoke "$VAULT" set_engine --engine "$ENGINE"
 invoke "$ENGINE" register_adapter --adapter "$TENKA" --originator TENKA --jurisdiction LU --cap_bps 7000
@@ -58,6 +58,7 @@ cat > deployments/testnet.json <<JSON
 {
   "network": "testnet",
   "usdc": "$USDC",
+  "bond": "$BOND",
   "owner": "$ME",
   "curator": "$CURATOR",
   "operator": "$OPERATOR",
@@ -67,8 +68,7 @@ cat > deployments/testnet.json <<JSON
     "allocationEngine": "$ENGINE",
     "oracle": "$ORACLE",
     "privateCreditAdapter": "$TENKA",
-    "etherfuseAdapter": "$BONDS",
-    "mockStablebond": "$BOND_POOL"
+    "etherfuseAdapter": "$BONDS"
   }
 }
 JSON

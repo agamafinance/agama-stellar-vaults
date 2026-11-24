@@ -7,7 +7,6 @@ members = [
   "contracts/allocation-engine",
   "adapters/private-credit",
   "adapters/etherfuse",
-  "mocks/mock-stablebond",
   "tests/integration",
 ]
 

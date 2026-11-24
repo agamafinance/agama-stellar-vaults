@@ -1,114 +1,122 @@
-23:49:49 == phase 0: accounts
-23:51:27    12 users funded
-23:51:27 == phase 1: prices (tkUSD relayed from Tenka Sepolia)
-23:51:28    Tenka Sepolia convertToAssets(1e6) -> tkUSD price 1.0000000
-23:51:28   ok   Tenka Sepolia share price readable
-23:51:40   ok   SEP-40 lastprice returns the relayed tkUSD price
-23:51:40   ok   reporter cannot move tkUSD by 100%
-23:51:41   ok   non-reporter cannot push a price
-23:51:41 == phase 2: seed deposit and user deposits
-23:51:53   ok   agv-user-0 deposit 138 USDC -> 1380000000 agUSD = preview
-23:52:03   ok   agv-user-1 deposit 2098 USDC -> 20980000000 agUSD = preview
-23:52:16   ok   agv-user-2 deposit 129 USDC -> 1290000000 agUSD = preview
-23:52:23   ok   agv-user-3 deposit 96 USDC -> 960000000 agUSD = preview
-23:52:28   ok   agv-user-4 deposit 372 USDC -> 3720000000 agUSD = preview
-23:52:32   ok   agv-user-5 deposit 131 USDC -> 1310000000 agUSD = preview
-23:52:37   ok   agv-user-6 deposit 127 USDC -> 1270000000 agUSD = preview
-23:52:44   ok   agv-user-7 deposit 306 USDC -> 3060000000 agUSD = preview
-23:52:53   ok   agv-user-8 deposit 1005 USDC -> 10050000000 agUSD = preview
-23:53:02   ok   agv-user-9 deposit 66 USDC -> 660000000 agUSD = preview
-23:53:09   ok   agv-user-10 deposit 1148 USDC -> 11480000000 agUSD = preview
-23:53:18   ok   agv-user-11 deposit 889 USDC -> 8890000000 agUSD = preview
-23:53:18   ok   total assets = deposits + seed
-23:53:20   ok   deposit above balance fails
-23:53:21   ok   [deposits] total_assets 65060000000 = liquid 65060000000 + deployed 0
-23:53:31   ok   [deposits] reserved 0 = sum of claimable 0
-23:53:31   ok   [deposits] pending shares 0 = vault custody 0
-23:53:32   ok   [deposits] vault USDC 65060000000 = liquid + reserved
-23:53:42   ok   [deposits] supply 65060000000 = sum of balances 65060000000
-23:53:42 == phase 3: allocation (caps, floor, real Etherfuse auth path)
-23:53:44   ok   non-curator cannot allocate
-23:53:44   ok   bonds cap 50% enforced
-23:53:49   ok   Etherfuse adapter subscribed on-chain (authorize_as_current_contract)
-23:53:49   ok   10% reserve floor enforced
-23:53:54   ok   vault.release refuses anyone but the engine
-23:53:55   ok   [allocated] total_assets 65060000000 = liquid 9759000000 + deployed 55301000000
-23:54:05   ok   [allocated] reserved 0 = sum of claimable 0
-23:54:06   ok   [allocated] pending shares 0 = vault custody 0
-23:54:06   ok   [allocated] vault USDC 9759000000 = liquid + reserved
-23:54:17   ok   [allocated] supply 65060000000 = sum of balances 65060000000
-23:54:17 == phase 4: Tenka cycle (operator)
-23:54:18   ok   non-operator cannot dispatch
-23:54:25   ok   USDC in transit to Ethereum
-23:54:25   ok   fill 10% off the oracle price refused
-23:54:28   ok   Tenka position value 35783000000 ~ 35783000000
-23:54:29   ok   [tenka subscribed] total_assets 65060000000 = liquid 9759000000 + deployed 55301000000
-23:54:39   ok   [tenka subscribed] reserved 0 = sum of claimable 0
-23:54:40   ok   [tenka subscribed] pending shares 0 = vault custody 0
-23:54:40   ok   [tenka subscribed] vault USDC 9759000000 = liquid + reserved
-23:54:51   ok   [tenka subscribed] supply 65060000000 = sum of balances 65060000000
-23:54:51 == phase 5: yield
-23:55:10   ok   agUSD price rose 10000000 -> 10019499
-23:55:11   ok   [yield] total_assets 65186867000 = liquid 9759000000 + deployed 55427867000
-23:55:23   ok   [yield] reserved 0 = sum of claimable 0
-23:55:24   ok   [yield] pending shares 0 = vault custody 0
-23:55:24   ok   [yield] vault USDC 9759000000 = liquid + reserved
-23:55:35   ok   [yield] supply 65060000000 = sum of balances 65060000000
-23:55:35 == phase 6: sync exits within liquidity
-23:55:45   ok   agv-user-1 withdrew 50000000 synchronously
-23:55:56   ok   max_withdraw <= liquidity
-23:55:57   ok   withdraw above liquidity fails
-23:55:59   ok   cannot redeem someone else's shares
-23:56:00   ok   [sync exits] total_assets 65136867000 = liquid 9709000000 + deployed 55427867000
-23:56:10   ok   [sync exits] reserved 0 = sum of claimable 0
-23:56:11   ok   [sync exits] pending shares 0 = vault custody 0
-23:56:11   ok   [sync exits] vault USDC 9709000000 = liquid + reserved
-23:56:21   ok   [sync exits] supply 65010097310 = sum of balances 65010097310
-23:56:21 == phase 7: queue (big exits)
-23:56:53    queued [('agv-user-1', 0), ('agv-user-10', 1), ('agv-user-8', 2), ('agv-user-11', 3)]
-23:56:54   ok   queue closes sync exits
-23:56:55   ok   no allocation while redemptions are pending
-23:56:56   ok   only the owner cancels
-23:57:04   ok   agv-user-11 cancel returned the shares
-23:57:23    processed before unwinding: 0
-23:57:24   ok   [queued] total_assets 65136867000 = liquid 9709000000 + deployed 55427867000
-23:57:39   ok   [queued] reserved 0 = sum of claimable 0
-23:57:40   ok   [queued] pending shares 51350097310 = vault custody 51350097310
-23:57:40   ok   [queued] vault USDC 9709000000 = liquid + reserved
-23:57:50   ok   [queued] supply 65010097310 = sum of balances 65010097310
-23:57:50 == phase 8: unwind (bonds on-chain, Tenka via operator) and process
-23:57:58   ok   bonds redeemed on-chain
-23:58:13   ok   processed 4 queued redemptions
-23:58:15   ok   [processed] total_assets 13686637001 = liquid 6508567201 + deployed 7178069800
-23:58:24   ok   [processed] reserved 51450229999 = sum of claimable 51450229999
-23:58:25   ok   [processed] pending shares 0 = vault custody 0
-23:58:26   ok   [processed] vault USDC 57958797200 = liquid + reserved
-23:58:36   ok   [processed] supply 13660000000 = sum of balances 13660000000
-23:58:45   ok   agv-user-1 claimed 2097.0911 USDC
-23:58:45    agv-user-1: deposited 2098.00, got 2097.0911 (-0.9089)
-23:58:55   ok   agv-user-10 claimed 1150.2386 USDC
-23:58:55    agv-user-10: deposited 1148.00, got 1150.2386 (+2.2386)
-23:59:03   ok   agv-user-8 claimed 1006.9597 USDC
-23:59:03    agv-user-8: deposited 1005.00, got 1006.9597 (+1.9598)
-23:59:09   ok   agv-user-11 claimed 890.7336 USDC
-23:59:09    agv-user-11: deposited 889.00, got 890.7336 (+1.7335)
-23:59:09   ok   queued holders paid
-23:59:10   ok   [claimed] total_assets 13686637001 = liquid 6508567201 + deployed 7178069800
-23:59:20   ok   [claimed] reserved 0 = sum of claimable 0
-23:59:20   ok   [claimed] pending shares 0 = vault custody 0
-23:59:21   ok   [claimed] vault USDC 6508567201 = liquid + reserved
-23:59:31   ok   [claimed] supply 13660000000 = sum of balances 13660000000
-23:59:31 == phase 9: pause
-23:59:39   ok   paused: max_deposit = 0
-23:59:41   ok   paused: deposit fails
-23:59:41   ok   only owner pauses
-23:59:53   ok   unpaused: deposit works
-23:59:53 == phase 10: stale price freezes valuation
-00:00:07   ok   stale tkUSD price: deposit refused
-00:00:17   ok   limits restored: deposit works
-00:00:19   ok   [final] total_assets 13706637001 = liquid 6528567201 + deployed 7178069800
-00:00:29   ok   [final] reserved 0 = sum of claimable 0
-00:00:30   ok   [final] pending shares 0 = vault custody 0
-00:00:31   ok   [final] vault USDC 6528567201 = liquid + reserved
-00:00:41   ok   [final] supply 13679961074 = sum of balances 13679961074
-00:00:41 == done: 94 passed, 0 failed
+09:39:14 == phase 0: accounts
+09:41:19    16 users funded
+09:41:19 == phase 1: prices (tkUSD relayed from Tenka Sepolia)
+09:41:19    Tenka Sepolia convertToAssets(1e6) -> tkUSD price 1.0000000
+09:41:19   ok   Tenka Sepolia share price readable
+09:41:24    Etherfuse mainnet oracle: CETES 0.0621025 USD, 84s old
+09:41:24   ok   Etherfuse SEP-40 CETES price readable and fresh
+09:41:29   ok   SEP-40 lastprice returns the relayed tkUSD price
+09:41:30   ok   reporter cannot move tkUSD by 100%
+09:41:30   ok   non-reporter cannot push a price
+09:41:30 == phase 2: seed deposit and user deposits
+09:41:47   ok   agv-user-0 deposit 96 USDC -> 960000000 agUSD = preview
+09:41:54   ok   agv-user-1 deposit 372 USDC -> 3720000000 agUSD = preview
+09:42:03   ok   agv-user-2 deposit 464 USDC -> 4640000000 agUSD = preview
+09:42:07   ok   agv-user-3 deposit 1732 USDC -> 17320000000 agUSD = preview
+09:42:14   ok   agv-user-4 deposit 306 USDC -> 3060000000 agUSD = preview
+09:42:23   ok   agv-user-5 deposit 81 USDC -> 810000000 agUSD = preview
+09:42:27   ok   agv-user-6 deposit 66 USDC -> 660000000 agUSD = preview
+09:42:34   ok   agv-user-7 deposit 2277 USDC -> 22770000000 agUSD = preview
+09:42:43   ok   agv-user-8 deposit 1758 USDC -> 17580000000 agUSD = preview
+09:42:47   ok   agv-user-9 deposit 80 USDC -> 800000000 agUSD = preview
+09:42:54   ok   agv-user-10 deposit 527 USDC -> 5270000000 agUSD = preview
+09:43:03   ok   agv-user-11 deposit 934 USDC -> 9340000000 agUSD = preview
+09:43:08   ok   agv-user-12 deposit 35 USDC -> 350000000 agUSD = preview
+09:43:12   ok   agv-user-13 deposit 1201 USDC -> 12010000000 agUSD = preview
+09:43:19   ok   agv-user-14 deposit 832 USDC -> 8320000000 agUSD = preview
+09:43:28   ok   agv-user-15 deposit 45 USDC -> 450000000 agUSD = preview
+09:43:28   ok   total assets = deposits + seed
+09:43:30   ok   deposit above balance fails
+09:43:31   ok   [deposits] total_assets 108070000000 = liquid 108070000000 + deployed 0
+09:43:43   ok   [deposits] reserved 0 = sum of claimable 0
+09:43:44   ok   [deposits] pending shares 0 = vault custody 0
+09:43:44   ok   [deposits] vault USDC 108070000000 = liquid + reserved
+09:43:57   ok   [deposits] supply 108070000000 = sum of balances 108070000000
+09:43:57 == phase 3: allocation (caps, floor) and CETES purchase
+09:43:58   ok   non-curator cannot allocate
+09:43:58   ok   bonds cap 50% enforced
+09:44:14   ok   CETES purchase 5% short of the oracle price refused
+09:44:19   ok   adapter holds 52205.63 CETES on-chain
+09:44:19   ok   CETES position value 32420999999 ~ 32421000000
+09:44:19   ok   10% reserve floor enforced
+09:44:24   ok   vault.release refuses anyone but the engine
+09:44:25   ok   [allocated] total_assets 108069999999 = liquid 16210500000 + deployed 91859499999
+09:44:38   ok   [allocated] reserved 0 = sum of claimable 0
+09:44:39   ok   [allocated] pending shares 0 = vault custody 0
+09:44:39   ok   [allocated] vault USDC 16210500000 = liquid + reserved
+09:44:52   ok   [allocated] supply 108070000000 = sum of balances 108070000000
+09:44:52 == phase 4: Tenka cycle (operator)
+09:44:53   ok   non-operator cannot dispatch
+09:45:00   ok   USDC in transit to Ethereum
+09:45:00   ok   fill 10% off the oracle price refused
+09:45:11   ok   Tenka position value 59438500000 ~ 59438500000
+09:45:13   ok   [tenka subscribed] total_assets 108069999999 = liquid 16210500000 + deployed 91859499999
+09:45:25   ok   [tenka subscribed] reserved 0 = sum of claimable 0
+09:45:26   ok   [tenka subscribed] pending shares 0 = vault custody 0
+09:45:26   ok   [tenka subscribed] vault USDC 16210500000 = liquid + reserved
+09:45:38   ok   [tenka subscribed] supply 108070000000 = sum of balances 108070000000
+09:45:38 == phase 5: yield
+09:45:48   ok   agUSD price rose 9999999 -> 10019499
+09:45:49   ok   [yield] total_assets 108280735194 = liquid 16210500000 + deployed 92070235194
+09:46:01   ok   [yield] reserved 0 = sum of claimable 0
+09:46:02   ok   [yield] pending shares 0 = vault custody 0
+09:46:02   ok   [yield] vault USDC 16210500000 = liquid + reserved
+09:46:15   ok   [yield] supply 108070000000 = sum of balances 108070000000
+09:46:15 == phase 6: sync exits within liquidity
+09:46:25   ok   agv-user-1 withdrew 50000000 synchronously
+09:46:38   ok   max_withdraw <= liquidity
+09:46:40   ok   withdraw above liquidity fails
+09:46:41   ok   cannot redeem someone else's shares
+09:46:42   ok   [sync exits] total_assets 108230735194 = liquid 16160500000 + deployed 92070235194
+09:46:55   ok   [sync exits] reserved 0 = sum of claimable 0
+09:46:56   ok   [sync exits] pending shares 0 = vault custody 0
+09:46:56   ok   [sync exits] vault USDC 16160500000 = liquid + reserved
+09:47:09   ok   [sync exits] supply 108020097309 = sum of balances 108020097309
+09:47:09 == phase 7: queue (big exits)
+09:47:51    queued [('agv-user-7', 0), ('agv-user-8', 1), ('agv-user-3', 2), ('agv-user-13', 3)]
+09:47:51   ok   queue closes sync exits
+09:47:52   ok   no allocation while redemptions are pending
+09:47:53   ok   only the owner cancels
+09:48:00   ok   agv-user-13 cancel returned the shares
+09:48:18    processed before unwinding: 0
+09:48:19   ok   [queued] total_assets 108230735194 = liquid 16160500000 + deployed 92070235194
+09:48:31   ok   [queued] reserved 0 = sum of claimable 0
+09:48:32   ok   [queued] pending shares 69680000000 = vault custody 69680000000
+09:48:32   ok   [queued] vault USDC 16160500000 = liquid + reserved
+09:48:45   ok   [queued] supply 108020097309 = sum of balances 108020097309
+09:48:45 == phase 8: unwind (bonds on-chain, Tenka via operator) and process
+09:49:14   ok   CETES sold and USDC returned to the vault
+09:49:30   ok   processed 4 queued redemptions
+09:49:31   ok   [processed] total_assets 38414860037 = liquid 26491496937 + deployed 11923363100
+09:49:43   ok   [processed] reserved 69815875157 = sum of claimable 69815875157
+09:49:44   ok   [processed] pending shares 0 = vault custody 0
+09:49:44   ok   [processed] vault USDC 96307372094 = liquid + reserved
+09:49:57   ok   [processed] supply 38340097309 = sum of balances 38340097309
+09:50:04   ok   agv-user-7 claimed 2281.4401 USDC
+09:50:04    agv-user-7: deposited 2277.00, got 2281.4401 (+4.4401)
+09:50:08   ok   agv-user-8 claimed 1761.4281 USDC
+09:50:08    agv-user-8: deposited 1758.00, got 1761.4281 (+3.4281)
+09:50:13   ok   agv-user-3 claimed 1735.3774 USDC
+09:50:13    agv-user-3: deposited 1732.00, got 1735.3774 (+3.3774)
+09:50:18   ok   agv-user-13 claimed 1203.3419 USDC
+09:50:18    agv-user-13: deposited 1201.00, got 1203.3419 (+2.3419)
+09:50:18   ok   queued holders paid
+09:50:19   ok   [claimed] total_assets 38414860037 = liquid 26491496937 + deployed 11923363100
+09:50:31   ok   [claimed] reserved 0 = sum of claimable 0
+09:50:32   ok   [claimed] pending shares 0 = vault custody 0
+09:50:32   ok   [claimed] vault USDC 26491496937 = liquid + reserved
+09:50:45   ok   [claimed] supply 38340097309 = sum of balances 38340097309
+09:50:45 == phase 9: pause
+09:50:48   ok   paused: max_deposit = 0
+09:50:50   ok   paused: deposit fails
+09:50:50   ok   only owner pauses
+09:51:09   ok   unpaused: deposit works
+09:51:09 == phase 10: stale price freezes valuation
+09:51:23   ok   stale tkUSD price: deposit refused
+09:51:37   ok   limits restored: deposit works
+09:51:39   ok   [final] total_assets 38434860037 = liquid 26511496937 + deployed 11923363100
+09:51:51   ok   [final] reserved 0 = sum of claimable 0
+09:51:51   ok   [final] pending shares 0 = vault custody 0
+09:51:52   ok   [final] vault USDC 26511496937 = liquid + reserved
+09:52:04   ok   [final] supply 38360058385 = sum of balances 38360058385
+09:52:04 == done: 101 passed, 0 failed

@@ -18,7 +18,6 @@ name = "agama-etherfuse-adapter"
 version = "0.1.0"
 dependencies = [
  "agama-interfaces",
- "agama-mock-stablebond",
  "agama-oracle",
  "soroban-sdk",
  "stellar-access",
@@ -32,7 +31,6 @@ dependencies = [
  "agama-allocation-engine",
  "agama-etherfuse-adapter",
  "agama-interfaces",
- "agama-mock-stablebond",
  "agama-oracle",
  "agama-private-credit-adapter",
  "agama-vault",
@@ -43,14 +41,6 @@ dependencies = [
 name = "agama-interfaces"
 version = "0.1.0"
 dependencies = [
- "soroban-sdk",
-]
-
-[[package]]
-name = "agama-mock-stablebond"
-version = "0.1.0"
-dependencies = [
- "agama-interfaces",
  "soroban-sdk",
 ]
 

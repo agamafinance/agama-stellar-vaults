@@ -5,8 +5,8 @@
 
 Reads deployments/testnet.json. Needs the stellar-cli keys used by
 scripts/deploy-testnet.sh: `agama` (owner), `agv-curator`, `agv-operator`,
-`agv-reporter`, and `agv-issuer` (issuer of the test USDC asset, admin of its
-SAC). Test users are generated and funded with friendbot.
+`agv-reporter`, and `agv-issuer` (issuer of the test USDC and CETES assets, admin of their
+SACs). Test users are generated and funded with friendbot.
 
 The tkUSD price pushed to the oracle is read live from Tenka's Sepolia
 staging Master Vault (`convertToAssets(1e6)`), the value the production
@@ -32,13 +32,19 @@ TK = 1_000_000  # tkUSD 6 dp
 ONE = 10_000_000  # oracle 7 dp
 SEPOLIA_RPC = "https://ethereum-sepolia-rpc.publicnode.com"
 TENKA_MASTER_VAULT = "0x1EF979B3b1fFA92b86Ea10125a70462C4380eDab"
+MAINNET_RPC = "https://mainnet.sorobanrpc.com"
+MAINNET_PASSPHRASE = "Public Global Stellar Network ; September 2015"
+# Etherfuse SEP-40 aggregator and the CETES SAC, Stellar mainnet
+ETHERFUSE_ORACLE = "CAVRP26CWW6IUEXBRA3Q2T2SHBUVBC2DF43M4E23LEZGW5ZEIB62HALS"
+CETES_MAINNET = "CAL6ER2TI6CTRAY6BFXWNWA7WTYXUXTQCHUBCIBU5O6KM3HJFG6Z6VXV"
 
 D = json.load(open("deployments/testnet.json"))
 C = D["contracts"]
 VAULT, ENGINE, ORACLE = C["vault"], C["allocationEngine"], C["oracle"]
-TENKA, BONDS, BOND_POOL = C["privateCreditAdapter"], C["etherfuseAdapter"], C["mockStablebond"]
+TENKA, BONDS = C["privateCreditAdapter"], C["etherfuseAdapter"]
+BOND = D["bond"]
 TKUSD = '{"Other":"TKUSD"}'
-BOND_FEED = json.dumps({"Stellar": BOND_POOL})
+BOND_FEED = json.dumps({"Stellar": BOND})
 
 checks = {"pass": 0, "fail": 0}
 log_lines = []
@@ -123,6 +129,17 @@ def tenka_share_price():
     return int(res["result"], 16) * 10
 
 
+def etherfuse_cetes_price():
+    """CETES price from Etherfuse's mainnet SEP-40 aggregator, 14 dp -> 7 dp."""
+    out = sh(["stellar", "contract", "invoke", "--quiet", "--rpc-url", MAINNET_RPC,
+              "--network-passphrase", MAINNET_PASSPHRASE, "--source", "agama",
+              "--id", ETHERFUSE_ORACLE, "--send", "no", "--", "lastprice",
+              "--asset", json.dumps({"Stellar": CETES_MAINNET})])
+    p = json.loads(out)
+    age = int(time.time()) - int(p["timestamp"])
+    return int(p["price"]) // 10**7, age
+
+
 # ---------------------------------------------------------------- setup
 
 def new_user(i, issuer):
@@ -133,10 +150,10 @@ def new_user(i, issuer):
     return name
 
 
-def trust(key, issuer):
+def trust(key, issuer, code="USDC"):
     try:
         sh(["stellar", "tx", "new", "change-trust", "--quiet", "--network", NET, "--source", key,
-            "--line", f"USDC:{issuer}"])
+            "--line", f"{code}:{issuer}"])
     except RuntimeError as e:
         if "already" not in str(e).lower():
             raise
@@ -187,11 +204,11 @@ def main():
         users = list(ex.map(lambda i: new_user(i, issuer), range(a.users)))
     with ThreadPoolExecutor(6) as ex:
         list(ex.map(lambda k: trust(k, issuer), users + ["agama", "agv-operator"]))
+    trust("agv-operator", issuer, "CETES")
     for u in users:
         mint(addr(u), rng.randint(50, 2_000) * USDC)
     mint(owner, USDC)
     mint(operator, 10_000 * USDC)  # stands in for USDC bridged back from Ethereum
-    mint(BOND_POOL, 10_000 * USDC)  # bond pool reserves to pay accrual
     log(f"   {len(users)} users funded")
 
     log("== phase 1: prices (tkUSD relayed from Tenka Sepolia)")
@@ -201,8 +218,11 @@ def main():
     now = int(time.time()) - 30
     invoke("agv-reporter", ORACLE, "set_price", "--reporter", reporter, "--asset", TKUSD,
            "--price", tk_price, "--timestamp", now)
+    cetes, age = etherfuse_cetes_price()
+    log(f"   Etherfuse mainnet oracle: CETES {cetes / ONE:.7f} USD, {age}s old")
+    check(cetes > 0 and age < 3600, "Etherfuse SEP-40 CETES price readable and fresh")
     invoke("agv-reporter", ORACLE, "set_price", "--reporter", reporter, "--asset", BOND_FEED,
-           "--price", ONE, "--timestamp", now)
+           "--price", cetes, "--timestamp", now)
     lp = view(ORACLE, "lastprice", "--asset", TKUSD)
     check(int(lp["price"]) == tk_price, "SEP-40 lastprice returns the relayed tkUSD price")
     check(fails("agv-reporter", ORACLE, "set_price", "--reporter", reporter, "--asset", TKUSD,
@@ -227,7 +247,7 @@ def main():
                 "--from", addr(users[0]), "--operator", addr(users[0])), "deposit above balance fails")
     invariants(users, "deposits")
 
-    log("== phase 3: allocation (caps, floor, real Etherfuse auth path)")
+    log("== phase 3: allocation (caps, floor) and CETES purchase")
     bonds_amt = total0 * 30 // 100
     tenka_amt = total0 * 55 // 100
     check(fails("agv-operator", ENGINE, "allocate", "--adapter", BONDS, "--amount", USDC),
@@ -235,7 +255,16 @@ def main():
     check(fails("agv-curator", ENGINE, "allocate", "--adapter", BONDS, "--amount", total0 * 51 // 100),
           "bonds cap 50% enforced")
     invoke("agv-curator", ENGINE, "allocate", "--adapter", BONDS, "--amount", bonds_amt)
-    check(num(view(BONDS, "units")) > 0, "Etherfuse adapter subscribed on-chain (authorize_as_current_contract)")
+    # the operator buys CETES through Etherfuse (stood in by the test issuer)
+    invoke("agv-operator", BONDS, "dispatch", "--usdc", bonds_amt)
+    bonds = bonds_amt * ONE // cetes
+    invoke("agv-issuer", BOND, "mint", "--to", operator, "--amount", bonds)
+    check(fails("agv-operator", BONDS, "confirm_purchase", "--usdc", bonds_amt, "--bonds", bonds * 95 // 100),
+          "CETES purchase 5% short of the oracle price refused")
+    invoke("agv-operator", BONDS, "confirm_purchase", "--usdc", bonds_amt, "--bonds", bonds)
+    check(num(view(BONDS, "bonds")) == bonds, f"adapter holds {bonds / ONE:.2f} CETES on-chain")
+    bv = num(view(BONDS, "total_value"))
+    check(abs(bv - bonds_amt) <= bonds_amt // 10_000, f"CETES position value {bv} ~ {bonds_amt}")
     check(fails("agv-curator", ENGINE, "allocate", "--adapter", TENKA,
                 "--amount", total0 - bonds_amt - total0 * 9 // 100), "10% reserve floor enforced")
     invoke("agv-curator", ENGINE, "allocate", "--adapter", TENKA, "--amount", tenka_amt)
@@ -260,9 +289,8 @@ def main():
     now = int(time.time()) - 5
     invoke("agv-reporter", ORACLE, "set_price", "--reporter", reporter, "--asset", TKUSD,
            "--price", tk_price * 1003 // 1000, "--timestamp", now)
-    invoke("agama", BOND_POOL, "set_price", "--price", ONE * 1001 // 1000)
     invoke("agv-reporter", ORACLE, "set_price", "--reporter", reporter, "--asset", BOND_FEED,
-           "--price", ONE * 1001 // 1000, "--timestamp", now)
+           "--price", cetes * 1001 // 1000, "--timestamp", now)
     after = num(view(VAULT, "convert_to_assets", "--shares", USDC))
     check(after > before, f"agUSD price rose {before} -> {after}")
     invariants(users, "yield")
@@ -307,9 +335,13 @@ def main():
     invariants(users, "queued")
 
     log("== phase 8: unwind (bonds on-chain, Tenka via operator) and process")
-    bonds_val = num(view(BONDS, "total_value"))
-    invoke("agv-curator", ENGINE, "deallocate", "--adapter", BONDS, "--amount", bonds_val)
-    check(num(view(BONDS, "units")) <= 1, "bonds redeemed on-chain")
+    held_bonds = num(view(BONDS, "bonds"))
+    invoke("agv-operator", BONDS, "dispatch_bonds", "--bonds", held_bonds)
+    proceeds = held_bonds * (cetes * 1001 // 1000) // ONE
+    mint(operator, proceeds)  # Etherfuse pays the sale
+    invoke("agv-operator", BONDS, "settle_sale", "--bonds", held_bonds, "--usdc", proceeds)
+    invoke("agv-curator", ENGINE, "deallocate", "--adapter", BONDS, "--amount", proceeds)
+    check(num(view(BONDS, "total_value")) == 0, "CETES sold and USDC returned to the vault")
     held = num(view(TENKA, "units"))
     price_now = int(view(ORACLE, "lastprice", "--asset", TKUSD)["price"])
     redeem_units = held * 8 // 10

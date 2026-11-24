@@ -17,4 +17,3 @@ agama-oracle = { path = "../../contracts/oracle" }
 agama-allocation-engine = { path = "../../contracts/allocation-engine" }
 agama-private-credit-adapter = { path = "../../adapters/private-credit" }
 agama-etherfuse-adapter = { path = "../../adapters/etherfuse" }
-agama-mock-stablebond = { path = "../../mocks/mock-stablebond" }

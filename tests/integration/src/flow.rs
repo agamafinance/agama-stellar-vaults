@@ -3,7 +3,6 @@ extern crate std;
 use agama_allocation_engine::{AllocationEngine, AllocationEngineClient};
 use agama_etherfuse_adapter::{Config as EfConfig, EtherfuseAdapter, EtherfuseAdapterClient};
 use agama_interfaces::Asset;
-use agama_mock_stablebond::{MockStablebond, MockStablebondClient};
 use agama_oracle::{AgamaOracle, AgamaOracleClient};
 use agama_private_credit_adapter::{
     Config as PcConfig, PrivateCreditAdapter, PrivateCreditAdapterClient,
@@ -31,7 +30,8 @@ struct System<'a> {
     vault: AgamaVaultContractClient<'a>,
     engine: AllocationEngineClient<'a>,
     oracle: AgamaOracleClient<'a>,
-    bond_pool: MockStablebondClient<'a>,
+    bond: Address,
+    mint_bond: StellarAssetClient<'a>,
     tenka: PrivateCreditAdapterClient<'a>,
     bonds: EtherfuseAdapterClient<'a>,
 }
@@ -74,16 +74,18 @@ fn deploy<'a>() -> System<'a> {
             DAY as u32,
         ),
     );
-    let bond_pool_id = e.register(MockStablebond, (owner.clone(), usdc_id.clone(), ONE));
+    let bond_id = e
+        .register_stellar_asset_contract_v2(owner.clone())
+        .address();
 
     let oracle = AgamaOracleClient::new(&e, &oracle_id);
     oracle.set_reporter(&reporter, &true);
     oracle.add_feed(&tkusd(), &500);
-    oracle.add_feed(&Asset::Stellar(bond_pool_id.clone()), &0);
+    oracle.add_feed(&Asset::Stellar(bond_id.clone()), &0);
     oracle.set_price(&reporter, &tkusd(), &ONE, &(100 * DAY));
     oracle.set_price(
         &reporter,
-        &Asset::Stellar(bond_pool_id.clone()),
+        &Asset::Stellar(bond_id.clone()),
         &ONE,
         &(100 * DAY),
     );
@@ -111,10 +113,10 @@ fn deploy<'a>() -> System<'a> {
             EfConfig {
                 engine: engine_id.clone(),
                 asset: usdc_id.clone(),
-                pool: bond_pool_id.clone(),
+                bond: bond_id.clone(),
+                operator: operator.clone(),
                 oracle: oracle_id.clone(),
-                feed: Asset::Stellar(bond_pool_id.clone()),
-                unit_decimals: 7,
+                feed: Asset::Stellar(bond_id.clone()),
                 max_age: 14 * DAY,
                 max_slippage_bps: 50,
             },
@@ -147,7 +149,8 @@ fn deploy<'a>() -> System<'a> {
         vault,
         engine,
         oracle,
-        bond_pool: MockStablebondClient::new(&e, &bond_pool_id),
+        mint_bond: StellarAssetClient::new(&e, &bond_id),
+        bond: bond_id,
         tenka: PrivateCreditAdapterClient::new(&e, &tenka_id),
         bonds: EtherfuseAdapterClient::new(&e, &bonds_id),
         e,
@@ -183,7 +186,13 @@ fn deposit_allocate_earn_queue_and_exit() {
     assert_eq!(s.vault.liquid_assets(), 100 * USDC);
     assert_eq!(s.vault.total_assets(), 1_000 * USDC);
 
-    // 3. Operator bridges to Tenka and books the tkUSD units.
+    // 3a. Operator buys Stablebonds through Etherfuse and delivers them.
+    s.bonds.dispatch(&(300 * USDC));
+    s.mint_bond.mint(&s.operator, &(300 * ONE));
+    s.bonds.confirm_purchase(&(300 * USDC), &(300 * ONE));
+    assert_eq!(s.vault.total_assets(), 1_000 * USDC);
+
+    // 3b. Operator bridges to Tenka and books the tkUSD units.
     s.tenka.dispatch(&(600 * USDC));
     s.tenka.confirm_subscription(&(600 * USDC), &(600 * TK));
     assert_eq!(s.vault.total_assets(), 1_000 * USDC);
@@ -192,11 +201,9 @@ fn deposit_allocate_earn_queue_and_exit() {
     s.at(107 * DAY);
     s.oracle
         .set_price(&s.reporter, &tkusd(), &(ONE * 1003 / 1000), &(107 * DAY));
-    s.bond_pool.set_price(&(ONE * 1001 / 1000));
-    s.mint.mint(&s.bond_pool.address, &(10 * USDC));
     s.oracle.set_price(
         &s.reporter,
-        &Asset::Stellar(s.bond_pool.address.clone()),
+        &Asset::Stellar(s.bond.clone()),
         &(ONE * 1001 / 1000),
         &(107 * DAY),
     );
@@ -212,8 +219,13 @@ fn deposit_allocate_earn_queue_and_exit() {
     assert_eq!(s.vault.max_withdraw(&bob), 0); // queue closes sync exits
     assert_eq!(s.vault.process_redeems(&5), 0); // not enough liquidity
 
-    // 6. Curator pulls the bonds back (instant) and Tenka redeems part.
-    s.engine.deallocate(&s.bonds.address, &(300 * USDC));
+    // 6. The operator sells the bonds and Tenka redeems part; the curator
+    //    brings the USDC home.
+    s.bonds.dispatch_bonds(&(300 * ONE));
+    let proceeds = 300 * USDC * 1001 / 1000;
+    s.mint.mint(&s.operator, &proceeds);
+    s.bonds.settle_sale(&(300 * ONE), &proceeds);
+    s.engine.deallocate(&s.bonds.address, &proceeds);
     let units = 300 * TK;
     let back = 300 * USDC * 1003 / 1000;
     s.mint.mint(&s.operator, &back); // USDC bridged back from Ethereum
@@ -252,7 +264,7 @@ fn stale_credit_price_freezes_the_vault_until_refreshed() {
         .set_price(&s.reporter, &tkusd(), &ONE, &(115 * DAY));
     s.oracle.set_price(
         &s.reporter,
-        &Asset::Stellar(s.bond_pool.address.clone()),
+        &Asset::Stellar(s.bond.clone()),
         &ONE,
         &(115 * DAY),
     );
