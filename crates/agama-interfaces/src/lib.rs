@@ -90,22 +90,6 @@ pub trait VaultLiquidity {
 /// Basis points denominator.
 pub const BPS: i128 = 10_000;
 
-// ---------------------------------------------------------------- Stablebonds
-
-/// Subscription / redemption interface of an Etherfuse Stablebond pool, as
-/// consumed by the Etherfuse adapter. To be confirmed against the deployed
-/// Etherfuse contracts before mainnet; a mock implements it for tests.
-#[contractclient(name = "StablebondPoolClient")]
-pub trait StablebondPool {
-    /// Pulls `usdc_amount` from `from` and credits bond units to `from`.
-    /// Returns the units credited.
-    fn subscribe(e: Env, from: Address, usdc_amount: i128) -> i128;
-    /// Burns `units` of `from` and pays USDC to `from`. Returns the USDC paid.
-    fn redeem(e: Env, from: Address, units: i128) -> i128;
-    /// Bond units held by `holder`.
-    fn units(e: Env, holder: Address) -> i128;
-}
-
 // ---------------------------------------------------------------- valuation
 
 /// Value, in vault-asset units, of `units` priced at `price`.

@@ -1,6 +1,6 @@
 [package]
 name = "agama-etherfuse-adapter"
-description = "Allocation Engine adapter holding Etherfuse Stablebonds"
+description = "Allocation Engine adapter holding Etherfuse Stablebonds (operator-settled via the Etherfuse API)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -19,4 +19,3 @@ agama-interfaces = { workspace = true }
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
 agama-oracle = { path = "../../contracts/oracle" }
-agama-mock-stablebond = { path = "../../mocks/mock-stablebond" }
