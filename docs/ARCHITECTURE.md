@@ -99,3 +99,15 @@ the future. Freshness is checked by each consumer.
 | Operator | private credit and Etherfuse adapters | dispatch, confirm purchases / subscriptions, settle sales / redemptions |
 | Reporter | oracle | push prices within the deviation bound |
 | Anyone | vault | process the redemption queue |
+
+## Keeper
+
+`scripts/keeper.py` runs the off-chain duties, each round (default every 5 minutes):
+
+- relays the tkUSD share price (`MasterVault.convertToAssets(1e6)` on Ethereum) to the `TKUSD` feed;
+- relays the Stablebond price from Etherfuse's SEP-40 aggregator, with Etherfuse's timestamp;
+- processes the redemption queue when liquidity allows (simulated first, sent only if a request clears);
+- checks that the vault values (no stale price) and alerts otherwise.
+
+A price move beyond a feed's deviation bound is never pushed by the keeper: it alerts, and the owner decides
+(`force_price`).
