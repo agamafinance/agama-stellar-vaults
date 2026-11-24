@@ -44,6 +44,7 @@ Testnet: [`scripts/deploy-testnet.sh`](scripts/deploy-testnet.sh) deploys and wi
 [`deployments/testnet.json`](deployments/testnet.json)); [`scripts/testnet_battery.py`](scripts/testnet_battery.py)
 runs the end-to-end battery against it ([last run](deployments/testnet-battery.log)).
 
+- Keeper (price relays + redemption queue): `python3 scripts/keeper.py` (`--once` for a single round)
 - Tenka source review vs deployed contracts: [`docs/TENKA_VERIFICATION.md`](docs/TENKA_VERIFICATION.md)
 
 ## License
