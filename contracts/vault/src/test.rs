@@ -9,7 +9,7 @@ use soroban_sdk::{
     Address, Env, String,
 };
 
-use crate::{AgamaVaultContract, AgamaVaultContractClient};
+pub(crate) use crate::{AgamaVaultContract, AgamaVaultContractClient};
 
 const USDC: i128 = 10_000_000; // 7 decimals
 
