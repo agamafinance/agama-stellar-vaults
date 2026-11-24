@@ -15,6 +15,8 @@
 - **Owner** (intended: multisig) can change the engine, register adapters, set caps, pause, change the
   adapter operator and force an oracle price. A compromised owner can redirect capital via a malicious adapter.
 - **Curator** decides allocations, bounded by caps and the reserve floor.
+- **Etherfuse operator** executes Stablebond orders through the Etherfuse API; bonds are held on the adapter, so
+  only in-transit amounts depend on the operator.
 - **Private credit operator** holds the off-chain tkUSD position and reports unit counts. Fills are bounded by
   the oracle price (`max_slippage_bps`); the position itself must be reconciled against Ethereum from events.
 - **Reporters** set prices within the deviation bound; larger moves need the owner.
@@ -32,7 +34,8 @@
 
 ## Open points before mainnet
 
-- Confirm the `StablebondPool` interface against the deployed Etherfuse contracts.
+- Etherfuse: KYB of the operator account, API order flow (quote, order, webhooks), and whether to read Etherfuse's
+  SEP-40 aggregator directly instead of relaying it through the Agama oracle.
 - Tenka integration (see `docs/TENKA_VERIFICATION.md`): official Sepolia address book and source commit, KYC of the
   Agama operator, USDC↔AUSD swap and CCTP route, spread fee vs `max_slippage_bps`, and a production reporter relaying
   `MasterVault.convertToAssets(1e6)` (not `getLatestFundNav`) into the `TKUSD` feed.
@@ -44,4 +47,4 @@
 reporter accounts and generated users, relaying the live tkUSD share price from Tenka's Sepolia Master Vault. It
 checks every invariant above after each phase and asserts the expected refusals (access control, caps, reserve
 floor, oracle deviation, fill bounds, queue ordering, pause, stale price). Last run: `deployments/testnet-battery.log`.
-The Etherfuse `authorize_as_current_contract` subscription path is exercised there with real authorization.
+CETES is priced from Etherfuse's live mainnet SEP-40 aggregator, relayed into the testnet oracle.

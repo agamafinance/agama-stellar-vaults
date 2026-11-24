@@ -68,8 +68,20 @@ checked against the oracle price within `max_slippage_bps`.
 
 ### Etherfuse Stablebonds
 
-On-chain: `deposit` subscribes, `withdraw` redeems what is missing.
-`total_value = idle + units × price(stablebond)`, same staleness and fill checks.
+Stablebonds (CETES, USTRY, TESOURO) are classic Stellar assets with a Stellar Asset Contract, bought and sold
+through Etherfuse's API by a KYB'd account, not through an on-chain pool. The adapter follows the same
+operator-settled model, except the bonds sit on the adapter itself:
+
+```
+idle USDC ──dispatch──▶ usdc_in_transit ──confirm_purchase(usdc, bonds)──▶ bonds on the adapter
+    ▲                        │                                                 │
+    └─────cancel_transit─────┘                              dispatch_bonds ────┘
+    └──────settle_sale(bonds, usdc) ◀── bonds_in_transit ◀────────────────────┘
+```
+
+`confirm_purchase` pulls the bonds from the operator and `settle_sale` pulls the USDC, in the same call as the
+bookkeeping. `total_value = idle + usdc_in_transit + (bonds held + bonds_in_transit) × price`, price from a SEP-40
+feed (Etherfuse publishes one on-chain: base USD, 14 decimals), refused when older than `max_age` (1 hour).
 
 ## Oracle
 
@@ -84,6 +96,6 @@ the future. Freshness is checked by each consumer.
 | --- | --- | --- |
 | Owner (multisig) | all | configure, register adapters, caps, pause, force a price |
 | Curator | engine | allocate / deallocate |
-| Operator | private credit adapter | dispatch, confirm subscriptions, settle redemptions |
+| Operator | private credit and Etherfuse adapters | dispatch, confirm purchases / subscriptions, settle sales / redemptions |
 | Reporter | oracle | push prices within the deviation bound |
 | Anyone | vault | process the redemption queue |
