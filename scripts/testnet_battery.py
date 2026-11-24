@@ -247,7 +247,7 @@ def main():
                 "--from", addr(users[0]), "--operator", addr(users[0])), "deposit above balance fails")
     invariants(users, "deposits")
 
-    log("== phase 3: allocation (caps, floor, real Etherfuse auth path)")
+    log("== phase 3: allocation (caps, floor) and CETES purchase")
     bonds_amt = total0 * 30 // 100
     tenka_amt = total0 * 55 // 100
     check(fails("agv-operator", ENGINE, "allocate", "--adapter", BONDS, "--amount", USDC),
