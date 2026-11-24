@@ -30,6 +30,8 @@
 //! - no capital is released to the engine while redemptions are pending
 
 mod accounting;
+#[cfg(test)]
+mod proptests;
 mod queue;
 mod storage;
 #[cfg(test)]

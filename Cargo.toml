@@ -25,6 +25,7 @@ stellar-access = "0.8.0"
 stellar-contract-utils = "0.8.0"
 stellar-macros = "0.8.0"
 agama-interfaces = { path = "crates/agama-interfaces" }
+proptest = "1.5"
 
 [profile.release]
 opt-level = "z"
